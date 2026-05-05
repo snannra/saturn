@@ -1,0 +1,15 @@
+services:
+  redis:
+    image: redis:latest
+
+  postgresql:
+    image: postgres:latest
+    environment:
+      - POSTGRES_USER:admin
+      - POSTGRES_PASSWORD:password
+      - POSTGRES_DB:Saturn
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
