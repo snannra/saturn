@@ -1,31 +1,109 @@
-use crate::users::User;
-use axum::{extract::Json, http::StatusCode, response::IntoResponse};
-use chrono::{DateTime, Utc};
+use crate::{AppState, users::User};
+use axum::{
+    extract::{Json, Path, State},
+    http::StatusCode,
+};
+use chrono::Utc;
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct JobRequest {
     user: User,
     job: serde_json::Value,
-    scheduled_for: DateTime<Utc>,
-}
-
-struct JobState {
-    current_job: u32,
 }
 
 #[derive(Serialize)]
-pub struct JobResponse {
-    job_id: u32,
+pub struct JobCreateResponse {
+    job_id: i32,
     message: String,
 }
 
-pub async fn create_job(Json(job_request): Json<JobRequest>) -> (StatusCode, Json<JobResponse>) {
-    (
+#[derive(Serialize, sqlx::FromRow)]
+pub struct JobStatusResponse {
+    pub id: i32,
+    pub status: String,
+    pub job_data: serde_json::Value,
+}
+
+pub async fn create_job(
+    State(state): State<AppState>,
+    Json(job_request): Json<JobRequest>,
+) -> Result<(StatusCode, Json<JobCreateResponse>), StatusCode> {
+    let job_data = job_request.job;
+
+    let job_id: i32 = match sqlx::query_scalar(
+        r#"
+            INSERT INTO pendingjobs (
+                user_id,
+                scheduled_for,
+                job_data,
+                status
+            )
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+        "#,
+    )
+    .bind(job_request.user.username)
+    .bind(Utc::now().naive_utc())
+    .bind(&job_data)
+    .bind("pending")
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("postgres insert failed: {e}");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    let mut redis_conn = state
+        .redis
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|e| {
+            eprintln!("redis connection failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let redis_key = format!("job:{job_id}");
+
+    redis_conn
+        .set::<_, _, ()>(&redis_key, job_data.to_string())
+        .await
+        .map_err(|e| {
+            eprintln!("redis write failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok((
         StatusCode::OK,
-        Json(JobResponse {
-            job_id: 0,
+        Json(JobCreateResponse {
+            job_id,
             message: "Job Created Successfully".to_string(),
         }),
+    ))
+}
+
+pub async fn get_job(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<Json<JobStatusResponse>, StatusCode> {
+    let job = sqlx::query_as::<_, JobStatusResponse>(
+        r#"
+            SELECT 
+                id, 
+                status, 
+                job_data 
+            FROM pendingjobs 
+            WHERE id = $1
+        "#,
     )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    Ok(Json(job))
 }
