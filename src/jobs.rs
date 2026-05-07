@@ -7,6 +7,12 @@ use chrono::Utc;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, sqlx::FromRow)]
+pub struct JobToExecute {
+    pub id: i32,
+    pub job_data: serde_json::Value,
+}
+
 #[derive(Deserialize)]
 pub struct JobRequest {
     user: User,
@@ -32,6 +38,8 @@ pub async fn create_job(
 ) -> Result<(StatusCode, Json<JobCreateResponse>), StatusCode> {
     let job_data = job_request.job;
 
+    let now = Utc::now().timestamp();
+
     let job_id: i32 = match sqlx::query_scalar(
         r#"
             INSERT INTO pendingjobs (
@@ -45,7 +53,7 @@ pub async fn create_job(
         "#,
     )
     .bind(job_request.user.username)
-    .bind(Utc::now().naive_utc())
+    .bind(now)
     .bind(&job_data)
     .bind("pending")
     .fetch_one(&state.db)
@@ -67,10 +75,8 @@ pub async fn create_job(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let redis_key = format!("job:{job_id}");
-
-    redis_conn
-        .set::<_, _, ()>(&redis_key, job_data.to_string())
+    let _: () = redis_conn
+        .zadd("pending_jobs", job_id, now)
         .await
         .map_err(|e| {
             eprintln!("redis write failed: {e}");
