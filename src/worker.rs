@@ -1,13 +1,15 @@
 use crate::STATE;
 use crate::jobs::JobToExecute;
 use axum::http::StatusCode;
+use crossbeam::channel::Receiver;
 use sqlx;
-use tokio::sync::mpsc::UnboundedReceiver;
+use std::thread::sleep;
+use tokio::time::Duration;
 
-pub async fn worker(mut rx: UnboundedReceiver<JobToExecute>) {
+pub async fn worker(rx: Receiver<JobToExecute>) {
     let state = STATE.get().unwrap();
 
-    while let Some(job) = rx.recv().await {
+    while let Ok(job) = rx.recv() {
         sqlx::query(
             r#"
             UPDATE pendingjobs
@@ -24,7 +26,8 @@ pub async fn worker(mut rx: UnboundedReceiver<JobToExecute>) {
         })
         .unwrap();
 
-        println!("Executing Job {}: {}", job.id, job.job_data);
+        println!("Executing job {}: {}", job.id, job.job_data);
+        sleep(Duration::from_secs(1));
 
         sqlx::query(
             r#"

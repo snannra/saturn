@@ -1,8 +1,9 @@
 use axum::routing::{get, post};
+use crossbeam::channel::unbounded;
 use dotenvy::dotenv;
 use redis;
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use tokio::sync::{OnceCell, mpsc};
+use tokio::sync::OnceCell;
 
 use crate::{config::Config, jobs::JobToExecute};
 
@@ -46,15 +47,23 @@ pub async fn init_state() -> &'static AppState {
 async fn main() {
     let state = init_state().await;
 
-    let (tx, rx) = mpsc::unbounded_channel::<JobToExecute>();
+    let (tx, rx) = unbounded::<JobToExecute>();
 
-    tokio::spawn(async move {
-        let _ = scheduler::poll(tx).await;
-    });
+    for _ in 0..11 {
+        let tx = tx.clone();
 
-    tokio::spawn(async move {
-        let _ = worker::worker(rx).await;
-    });
+        tokio::spawn(async move {
+            let _ = scheduler::poll(tx).await;
+        });
+    }
+
+    for _ in 0..11 {
+        let rx = rx.clone();
+
+        tokio::spawn(async move {
+            let _ = worker::worker(rx).await;
+        });
+    }
 
     let app = axum::Router::new()
         .route("/createjob", post(jobs::create_job))

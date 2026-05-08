@@ -3,7 +3,7 @@ use axum::{
     extract::{Json, Path, State},
     http::StatusCode,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +17,7 @@ pub struct JobToExecute {
 pub struct JobRequest {
     user: User,
     job: serde_json::Value,
+    scheduled_at: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -37,8 +38,11 @@ pub async fn create_job(
     Json(job_request): Json<JobRequest>,
 ) -> Result<(StatusCode, Json<JobCreateResponse>), StatusCode> {
     let job_data = job_request.job;
-
-    let now = Utc::now().timestamp();
+    let job_time = job_request.scheduled_at.unwrap_or(Utc::now().to_rfc3339());
+    let scheduled = DateTime::parse_from_rfc3339(&job_time)
+        .unwrap()
+        .with_timezone(&Utc)
+        .timestamp();
 
     let job_id: i32 = match sqlx::query_scalar(
         r#"
@@ -53,7 +57,7 @@ pub async fn create_job(
         "#,
     )
     .bind(job_request.user.username)
-    .bind(now)
+    .bind(scheduled)
     .bind(&job_data)
     .bind("pending")
     .fetch_one(&state.db)
@@ -76,7 +80,7 @@ pub async fn create_job(
         })?;
 
     let _: () = redis_conn
-        .zadd("pending_jobs", job_id, now)
+        .zadd("pending_jobs", job_id, scheduled)
         .await
         .map_err(|e| {
             eprintln!("redis write failed: {e}");

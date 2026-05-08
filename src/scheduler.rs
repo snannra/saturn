@@ -1,12 +1,13 @@
 use super::{STATE, jobs::JobToExecute};
 use axum::http::StatusCode;
 use chrono::Utc;
+use crossbeam::channel::Sender;
 use redis::{self, AsyncCommands};
 use sqlx;
 use std::thread::sleep;
-use tokio::{sync::mpsc, time::Duration};
+use tokio::time::Duration;
 
-pub async fn poll(tx: mpsc::UnboundedSender<JobToExecute>) {
+pub async fn poll(tx: Sender<JobToExecute>) {
     let state = STATE.get().unwrap().clone();
 
     let mut redis_conn = state
@@ -19,15 +20,16 @@ pub async fn poll(tx: mpsc::UnboundedSender<JobToExecute>) {
         })
         .unwrap();
 
-    let now = Utc::now().timestamp();
-
     loop {
-        let job_ids: Vec<i32> = redis_conn
-            .zrangebyscore("pending_jobs", 0, "inf")
-            .await
-            .unwrap();
+        let now = Utc::now().timestamp();
 
-        println!("{:?}", job_ids);
+        let job_ids: Vec<i32> = match redis_conn.zrangebyscore("pending_jobs", 0, now).await {
+            Ok(ids) => {
+                println!("found job ids: {:?}", ids);
+                ids
+            }
+            Err(_) => vec![],
+        };
 
         if !job_ids.is_empty() {
             let _: () = redis_conn.zrem("pending_jobs", &job_ids).await.unwrap();
@@ -36,7 +38,7 @@ pub async fn poll(tx: mpsc::UnboundedSender<JobToExecute>) {
                 r#"
                     UPDATE pendingjobs
                     SET status = 'executing'
-                    WHERE id = ANY($1)
+                    WHERE id = ANY($1) AND status = 'pending'
                     RETURNING id, job_data
                     "#,
             )
