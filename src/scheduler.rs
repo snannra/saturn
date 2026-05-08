@@ -4,8 +4,6 @@ use chrono::Utc;
 use crossbeam::channel::Sender;
 use redis::{self, AsyncCommands};
 use sqlx;
-use std::thread::sleep;
-use tokio::time::Duration;
 
 pub async fn poll(tx: Sender<JobToExecute>) {
     let state = STATE.get().unwrap().clone();
@@ -51,7 +49,5 @@ pub async fn poll(tx: Sender<JobToExecute>) {
                 let _ = tx.send(job);
             });
         }
-
-        sleep(Duration::from_secs(1));
     }
 }
