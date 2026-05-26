@@ -31,7 +31,7 @@ pub async fn init_state() -> &'static AppState {
             let config = Config::from_env();
 
             let db = PgPoolOptions::new()
-                .max_connections(10)
+                .max_connections(50)
                 .connect(&config.postgres_url)
                 .await
                 .unwrap();

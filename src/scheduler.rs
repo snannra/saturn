@@ -33,7 +33,7 @@ pub async fn poll(tx: Sender<JobToExecute>) {
         if !job_ids.is_empty() {
             let _: () = redis_conn.zrem("pending_jobs", &job_ids).await.unwrap();
 
-            let jobs: Vec<JobToExecute> = sqlx::query_as::<_, JobToExecute>(
+            let jobs: Vec<JobToExecute> = match sqlx::query_as::<_, JobToExecute>(
                 r#"
                     UPDATE pendingjobs
                     SET status = 'executing',
@@ -46,7 +46,13 @@ pub async fn poll(tx: Sender<JobToExecute>) {
             .bind(db_now)
             .fetch_all(&state.db)
             .await
-            .unwrap();
+            {
+                Ok(rows) => rows,
+                Err(e) => {
+                    eprintln!("psql job search fail: {e}");
+                    continue;
+                }
+            };
 
             jobs.into_iter().for_each(|job| {
                 let _ = tx.send(job);

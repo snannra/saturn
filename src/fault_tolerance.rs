@@ -13,7 +13,7 @@ pub async fn recover_stuck_jobs() {
 
         let expired = now - Duration::seconds(30);
 
-        let expired_ids: Vec<(i32, DateTime<Utc>)> = sqlx::query_as(
+        let expired_ids: Vec<(i32, DateTime<Utc>)> = match sqlx::query_as(
             r#"
             UPDATE pendingjobs
             SET status = 'pending',
@@ -27,7 +27,14 @@ pub async fn recover_stuck_jobs() {
         .bind(expired)
         .fetch_all(&state.db)
         .await
-        .unwrap();
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                eprintln!("recover_stuck_jobs postgres failed: {e}");
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                continue;
+            }
+        };
 
         if !expired_ids.is_empty() {
             let mut redis_conn = state
