@@ -8,6 +8,7 @@ use tokio::sync::OnceCell;
 use crate::{config::Config, jobs::JobToExecute};
 
 mod config;
+mod fault_tolerance;
 mod jobs;
 mod scheduler;
 mod users;
@@ -62,6 +63,10 @@ async fn main() {
 
         tokio::spawn(async move {
             let _ = worker::worker(rx).await;
+        });
+
+        tokio::spawn(async move {
+            let _ = fault_tolerance::recover_stuck_jobs().await;
         });
     }
 

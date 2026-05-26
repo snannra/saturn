@@ -19,9 +19,10 @@ pub async fn poll(tx: Sender<JobToExecute>) {
         .unwrap();
 
     loop {
-        let now = Utc::now().timestamp();
+        let db_now = Utc::now();
+        let redis_now = db_now.timestamp();
 
-        let job_ids: Vec<i32> = match redis_conn.zrangebyscore("pending_jobs", 0, now).await {
+        let job_ids: Vec<i32> = match redis_conn.zrangebyscore("pending_jobs", 0, redis_now).await {
             Ok(ids) => {
                 println!("found job ids: {:?}", ids);
                 ids
@@ -35,12 +36,14 @@ pub async fn poll(tx: Sender<JobToExecute>) {
             let jobs: Vec<JobToExecute> = sqlx::query_as::<_, JobToExecute>(
                 r#"
                     UPDATE pendingjobs
-                    SET status = 'executing'
+                    SET status = 'executing',
+                        updated_at = $2
                     WHERE id = ANY($1) AND status = 'pending'
                     RETURNING id, job_data
                     "#,
             )
             .bind(&job_ids)
+            .bind(db_now)
             .fetch_all(&state.db)
             .await
             .unwrap();

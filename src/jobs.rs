@@ -17,7 +17,7 @@ pub struct JobToExecute {
 pub struct JobRequest {
     user: User,
     job: serde_json::Value,
-    scheduled_at: Option<String>,
+    scheduled_for: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -31,6 +31,8 @@ pub struct JobStatusResponse {
     pub id: i32,
     pub status: String,
     pub job_data: serde_json::Value,
+    pub updated_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
 }
 
 pub async fn create_job(
@@ -38,11 +40,12 @@ pub async fn create_job(
     Json(job_request): Json<JobRequest>,
 ) -> Result<(StatusCode, Json<JobCreateResponse>), StatusCode> {
     let job_data = job_request.job;
-    let job_time = job_request.scheduled_at.unwrap_or(Utc::now().to_rfc3339());
+    let job_time = job_request.scheduled_for.unwrap_or(Utc::now().to_rfc3339());
     let scheduled = DateTime::parse_from_rfc3339(&job_time)
         .unwrap()
-        .with_timezone(&Utc)
-        .timestamp();
+        .with_timezone(&Utc);
+
+    let now = Utc::now();
 
     let job_id: i32 = match sqlx::query_scalar(
         r#"
@@ -50,9 +53,10 @@ pub async fn create_job(
                 user_id,
                 scheduled_for,
                 job_data,
-                status
+                status,
+                updated_at
             )
-            VALUES ($1, $2, $3, $4)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING id
         "#,
     )
@@ -60,6 +64,7 @@ pub async fn create_job(
     .bind(scheduled)
     .bind(&job_data)
     .bind("pending")
+    .bind(now)
     .fetch_one(&state.db)
     .await
     {
@@ -79,8 +84,10 @@ pub async fn create_job(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+    let redis_score = scheduled.timestamp();
+
     let _: () = redis_conn
-        .zadd("pending_jobs", job_id, scheduled)
+        .zadd("pending_jobs", job_id, redis_score)
         .await
         .map_err(|e| {
             eprintln!("redis write failed: {e}");
@@ -105,7 +112,9 @@ pub async fn get_job(
             SELECT 
                 id, 
                 status, 
-                job_data 
+                job_data,
+                updated_at,
+                created_at
             FROM pendingjobs 
             WHERE id = $1
         "#,
