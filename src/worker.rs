@@ -11,7 +11,7 @@ pub async fn worker(rx: Receiver<JobToExecute>) {
     while let Ok(job) = rx.recv() {
         info!("Executing job.{}{}", job.id, job.job_data);
 
-        let now = Utc::now().timestamp();
+        let now = Utc::now();
 
         match sqlx::query(
             r#"

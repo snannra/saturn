@@ -1,5 +1,4 @@
 use super::{STATE, jobs::JobToExecute};
-use axum::http::StatusCode;
 use chrono::Utc;
 use crossbeam::channel::Sender;
 use redis::{self, AsyncCommands};
@@ -9,15 +8,7 @@ use tracing::{error, info};
 pub async fn poll(tx: Sender<JobToExecute>) {
     let state = STATE.get().unwrap().clone();
 
-    let mut redis_conn = state
-        .redis
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(|e| {
-            error!("Redis Connection Failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
-        .unwrap();
+    let mut redis_conn = state.redis.clone();
 
     loop {
         let db_now = Utc::now();

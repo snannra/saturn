@@ -84,14 +84,7 @@ pub async fn create_job(
 
     let redis_start = Instant::now();
 
-    let mut redis_conn = state
-        .redis
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(|e| {
-            error!("redis connection failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let mut redis_conn = state.redis.clone();
 
     let redis_score = scheduled.timestamp();
 

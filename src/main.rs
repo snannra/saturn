@@ -18,7 +18,7 @@ mod worker;
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
-    pub redis: redis::Client,
+    pub redis: redis::aio::MultiplexedConnection,
     pub config: Config,
 }
 
@@ -37,10 +37,19 @@ pub async fn init_state() -> &'static AppState {
                 .await
                 .unwrap();
 
-            let redis =
+            let redis_client =
                 redis::Client::open(&*config.redis_url).expect("failed to create redis client");
 
-            AppState { db, redis, config }
+            let redis_conn = redis_client
+                .get_multiplexed_async_connection()
+                .await
+                .unwrap();
+
+            AppState {
+                db,
+                redis: redis_conn,
+                config,
+            }
         })
         .await
 }

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use redis::AsyncCommands;
 use sqlx;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::STATE;
 
@@ -29,25 +29,21 @@ pub async fn recover_stuck_jobs() {
         .await
         {
             Ok(rows) => {
-                info!("Found {} failed jobs.", rows.len());
+                if rows.is_empty() {
+                    debug!("No jobs to recover");
+                } else {
+                    info!("Recovered {} jobs", rows.len());
+                }
                 rows
             }
             Err(e) => {
-                error!("No jobs to recover: {e}");
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                error!("Failed to recover jobs: {}", e);
                 continue;
             }
         };
 
         if !expired_ids.is_empty() {
-            let mut redis_conn = state
-                .redis
-                .get_multiplexed_async_connection()
-                .await
-                .map_err(|e| {
-                    error!("redis connection failed: {e}");
-                })
-                .unwrap();
+            let mut redis_conn = state.redis.clone();
 
             for (id, scheduled) in expired_ids {
                 let _: () = redis_conn
