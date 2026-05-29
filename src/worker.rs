@@ -1,6 +1,5 @@
 use crate::STATE;
 use crate::jobs::JobToExecute;
-use axum::http::StatusCode;
 use chrono::Utc;
 use crossbeam::channel::Receiver;
 use sqlx;
