@@ -1,6 +1,8 @@
 services:
   redis:
     image: redis:latest
+    ports:
+      - "6379:6379"
 
   postgresql:
     image: postgres:latest
@@ -10,6 +12,11 @@ services:
       - POSTGRES_DB:Saturn
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+  
+  saturn:
+    
 
 volumes:
   postgres_data:

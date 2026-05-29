@@ -6,6 +6,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use tracing::{error, info};
 
 #[derive(Debug, sqlx::FromRow)]
@@ -40,6 +41,7 @@ pub async fn create_job(
     State(state): State<AppState>,
     Json(job_request): Json<JobRequest>,
 ) -> Result<(StatusCode, Json<JobCreateResponse>), StatusCode> {
+    let start = Instant::now();
     let job_data = job_request.job;
     let job_time = job_request.scheduled_for.unwrap_or(Utc::now().to_rfc3339());
     let scheduled = DateTime::parse_from_rfc3339(&job_time)
@@ -78,6 +80,9 @@ pub async fn create_job(
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
+    let pg_elapsed = start.elapsed();
+
+    let redis_start = Instant::now();
 
     let mut redis_conn = state
         .redis
@@ -97,6 +102,17 @@ pub async fn create_job(
             error!("redis write failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+
+    let redis_elapsed = redis_start.elapsed();
+    let total_elapsed = start.elapsed();
+
+    info!(
+        job_id = job_id,
+        postgres_ms = pg_elapsed.as_millis(),
+        redis_ms = redis_elapsed.as_millis(),
+        total_ms = total_elapsed.as_millis(),
+        "Job Created"
+    );
 
     Ok((
         StatusCode::OK,
