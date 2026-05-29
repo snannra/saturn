@@ -24,14 +24,13 @@ pub async fn poll(tx: Sender<JobToExecute>) {
         let redis_now = db_now.timestamp();
 
         let job_ids: Vec<i32> = match redis_conn.zrangebyscore("pending_jobs", 0, redis_now).await {
-            Ok(ids) => {
-                info!("Found job Ids: {:?}", ids);
-                ids
-            }
+            Ok(ids) => ids,
             Err(_) => vec![],
         };
 
         if !job_ids.is_empty() {
+            info!("Found job ids: {:?}", job_ids);
+
             let _: () = redis_conn.zrem("pending_jobs", &job_ids).await.unwrap();
 
             let jobs: Vec<JobToExecute> = match sqlx::query_as::<_, JobToExecute>(
