@@ -2,6 +2,7 @@ use axum::http::StatusCode;
 use chrono::{DateTime, Duration, Utc};
 use redis::AsyncCommands;
 use sqlx;
+use tracing::{error, info};
 
 use crate::STATE;
 
@@ -28,9 +29,12 @@ pub async fn recover_stuck_jobs() {
         .fetch_all(&state.db)
         .await
         {
-            Ok(rows) => rows,
+            Ok(rows) => {
+                info!("Found {} failed jobs.", rows.len());
+                rows
+            }
             Err(e) => {
-                eprintln!("recover_stuck_jobs postgres failed: {e}");
+                error!("No jobs to recover: {e}");
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 continue;
             }
@@ -42,8 +46,7 @@ pub async fn recover_stuck_jobs() {
                 .get_multiplexed_async_connection()
                 .await
                 .map_err(|e| {
-                    eprintln!("redis connection failed: {e}");
-                    StatusCode::INTERNAL_SERVER_ERROR
+                    error!("redis connection failed: {e}");
                 })
                 .unwrap();
 
@@ -52,11 +55,11 @@ pub async fn recover_stuck_jobs() {
                     .zadd("pending_jobs", id, scheduled.timestamp())
                     .await
                     .map_err(|e| {
-                        eprintln!("redis zadd failed: {e}");
-                        StatusCode::INTERNAL_SERVER_ERROR
+                        error!("redis zadd failed: {e}");
                     })
                     .unwrap();
             }
+            info!("Finished replacing failed jobs");
         }
 
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;

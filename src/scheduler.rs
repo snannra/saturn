@@ -4,6 +4,7 @@ use chrono::Utc;
 use crossbeam::channel::Sender;
 use redis::{self, AsyncCommands};
 use sqlx;
+use tracing::{error, info};
 
 pub async fn poll(tx: Sender<JobToExecute>) {
     let state = STATE.get().unwrap().clone();
@@ -13,7 +14,7 @@ pub async fn poll(tx: Sender<JobToExecute>) {
         .get_multiplexed_async_connection()
         .await
         .map_err(|e| {
-            eprintln!("redis connection failed: {e}");
+            error!("Redis Connection Failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })
         .unwrap();
@@ -24,7 +25,7 @@ pub async fn poll(tx: Sender<JobToExecute>) {
 
         let job_ids: Vec<i32> = match redis_conn.zrangebyscore("pending_jobs", 0, redis_now).await {
             Ok(ids) => {
-                println!("found job ids: {:?}", ids);
+                info!("Found job Ids: {:?}", ids);
                 ids
             }
             Err(_) => vec![],
@@ -49,7 +50,7 @@ pub async fn poll(tx: Sender<JobToExecute>) {
             {
                 Ok(rows) => rows,
                 Err(e) => {
-                    eprintln!("psql job search fail: {e}");
+                    error!("SQL job search failed: {e}");
                     continue;
                 }
             };

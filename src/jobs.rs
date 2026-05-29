@@ -6,6 +6,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use tracing::{error, info};
 
 #[derive(Debug, sqlx::FromRow)]
 pub struct JobToExecute {
@@ -68,9 +69,12 @@ pub async fn create_job(
     .fetch_one(&state.db)
     .await
     {
-        Ok(id) => id,
+        Ok(id) => {
+            info!("Created job: {}", id);
+            id
+        }
         Err(e) => {
-            eprintln!("postgres insert failed: {e}");
+            error!("postgres insert failed: {e}");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -80,7 +84,7 @@ pub async fn create_job(
         .get_multiplexed_async_connection()
         .await
         .map_err(|e| {
-            eprintln!("redis connection failed: {e}");
+            error!("redis connection failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
@@ -90,7 +94,7 @@ pub async fn create_job(
         .zadd("pending_jobs", job_id, redis_score)
         .await
         .map_err(|e| {
-            eprintln!("redis write failed: {e}");
+            error!("redis write failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
