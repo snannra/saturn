@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use chrono::{DateTime, Utc};
+use metrics::{counter, histogram};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -77,10 +78,13 @@ pub async fn create_job(
         }
         Err(e) => {
             error!("postgres insert failed: {e}");
+            counter!("saturn_jobs_create_failed_total").increment(1);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
     let pg_elapsed = start.elapsed();
+    histogram!("saturn_postgres_insert_ms").record(pg_elapsed.as_secs_f64() * 1000.0);
+    counter!("saturn_jobs_created_total").increment(1);
 
     let redis_start = Instant::now();
 
@@ -97,7 +101,9 @@ pub async fn create_job(
         })?;
 
     let redis_elapsed = redis_start.elapsed();
+    histogram!("saturn_redis_insert_ms").record(redis_elapsed.as_secs_f64() * 1000.0);
     let total_elapsed = start.elapsed();
+    histogram!("saturn_job_create_total_ms").record(total_elapsed.as_secs_f64() * 1000.0);
 
     info!(
         job_id = job_id,

@@ -1,16 +1,22 @@
 use axum::routing::{get, post};
 use crossbeam::channel::unbounded;
 use dotenvy::dotenv;
+use metrics_exporter_prometheus::PrometheusHandle;
 use redis;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use tokio::sync::OnceCell;
 use tracing::info;
 
-use crate::{config::Config, jobs::JobToExecute};
+use crate::{
+    config::Config,
+    jobs::JobToExecute,
+    metrics::{metrics_handler, setup_metrics},
+};
 
 mod config;
 mod fault_tolerance;
 mod jobs;
+mod metrics;
 mod scheduler;
 mod users;
 mod worker;
@@ -20,6 +26,7 @@ pub struct AppState {
     pub db: PgPool,
     pub redis: redis::aio::MultiplexedConnection,
     pub config: Config,
+    pub prom_handle: PrometheusHandle,
 }
 
 static STATE: OnceCell<AppState> = OnceCell::const_new();
@@ -45,10 +52,13 @@ pub async fn init_state() -> &'static AppState {
                 .await
                 .unwrap();
 
+            let prom_handle = setup_metrics();
+
             AppState {
                 db,
                 redis: redis_conn,
                 config,
+                prom_handle,
             }
         })
         .await
@@ -96,6 +106,7 @@ async fn main() {
     let app = axum::Router::new()
         .route("/createjob", post(jobs::create_job))
         .route("/getjob/{id}", get(jobs::get_job))
+        .route("/metrics", get(metrics_handler))
         .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8000")
