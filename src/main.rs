@@ -1,18 +1,14 @@
 use axum::routing::{get, post};
 use crossbeam::channel::unbounded;
-use dotenvy::dotenv;
-use metrics_exporter_prometheus::PrometheusHandle;
-use redis;
-use sqlx::{PgPool, postgres::PgPoolOptions};
-use tokio::sync::OnceCell;
 use tracing::info;
 
 use crate::{
-    config::Config,
+    app_state::{AppState, init_state},
     jobs::JobToExecute,
-    metrics::{metrics_handler, setup_metrics},
+    metrics::metrics_handler,
 };
 
+mod app_state;
 mod config;
 mod fault_tolerance;
 mod jobs;
@@ -20,49 +16,6 @@ mod metrics;
 mod scheduler;
 mod users;
 mod worker;
-
-#[derive(Clone)]
-pub struct AppState {
-    pub db: PgPool,
-    pub redis: redis::aio::MultiplexedConnection,
-    pub config: Config,
-    pub prom_handle: PrometheusHandle,
-}
-
-static STATE: OnceCell<AppState> = OnceCell::const_new();
-
-pub async fn init_state() -> &'static AppState {
-    STATE
-        .get_or_init(|| async {
-            dotenv().ok();
-
-            let config = Config::from_env();
-
-            let db = PgPoolOptions::new()
-                .max_connections(50)
-                .connect(&config.postgres_url)
-                .await
-                .unwrap();
-
-            let redis_client =
-                redis::Client::open(&*config.redis_url).expect("failed to create redis client");
-
-            let redis_conn = redis_client
-                .get_multiplexed_async_connection()
-                .await
-                .unwrap();
-
-            let prom_handle = setup_metrics();
-
-            AppState {
-                db,
-                redis: redis_conn,
-                config,
-                prom_handle,
-            }
-        })
-        .await
-}
 
 #[tokio::main]
 async fn main() {

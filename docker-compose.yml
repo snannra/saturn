@@ -28,8 +28,8 @@ services:
       - POSTGRES_CONNECTION_URL=postgres://admin:password@postgresql:5432/Saturn
       - REDIS_CONNECTION_URL=redis://redis:6379
       - SCHEDULER_COUNT=1
-      - WORKER_COUNT=1
-      - FAULT_TOLERANCE_COUNT=1
+      - WORKER_COUNT=0
+      - FAULT_TOLERANCE_COUNT=0
     depends_on:
       - redis
       - postgresql

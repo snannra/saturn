@@ -3,7 +3,7 @@ use redis::AsyncCommands;
 use sqlx;
 use tracing::{debug, error, info};
 
-use crate::STATE;
+use crate::app_state::STATE;
 
 pub async fn recover_stuck_jobs() {
     let state = STATE.get().unwrap();

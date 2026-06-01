@@ -1,4 +1,4 @@
-use super::{STATE, jobs::JobToExecute};
+use super::{app_state::STATE, jobs::JobToExecute};
 use chrono::Utc;
 use crossbeam::channel::Sender;
 use redis::{self, AsyncCommands};

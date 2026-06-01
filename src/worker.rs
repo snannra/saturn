@@ -1,5 +1,4 @@
-use crate::STATE;
-use crate::jobs::JobToExecute;
+use crate::{app_state::STATE, jobs::JobToExecute};
 use chrono::Utc;
 use crossbeam::channel::Receiver;
 use sqlx;
