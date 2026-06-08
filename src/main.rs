@@ -1,71 +1,39 @@
-use axum::routing::{get, post};
-use crossbeam::channel::unbounded;
-use tracing::info;
+use clap::{Parser, Subcommand};
 
-use crate::{
-    app_state::{AppState, init_state},
-    jobs::JobToExecute,
-    metrics::metrics_handler,
-};
+use crate::app_state::AppState;
 
+mod api;
 mod app_state;
 mod config;
 mod fault_tolerance;
 mod jobs;
 mod metrics;
+mod node;
 mod scheduler;
 mod users;
 mod worker;
 
+#[derive(Parser)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    Api,
+    Scheduler,
+    Worker,
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let state = init_state().await;
-    info!("AppState Initialized");
+    let args = Cli::parse();
 
-    let (tx, rx) = unbounded::<JobToExecute>();
-
-    let sched_count: usize = std::env::var("SCHEDULER_COUNT")
-        .unwrap_or("11".to_string())
-        .parse()
-        .unwrap();
-    let worker_count: usize = std::env::var("WORKER_COUNT")
-        .unwrap_or("11".to_string())
-        .parse()
-        .unwrap();
-    for _ in 0..sched_count {
-        let tx = tx.clone();
-
-        tokio::spawn(async move {
-            let _ = scheduler::poll(tx).await;
-        });
+    match args.command {
+        Command::Api => api::run_api().await,
+        Command::Scheduler => scheduler::run_scheduler().await,
+        Command::Worker => worker::run_worker().await,
     }
-    info!("Scheduler's spawned");
-
-    for _ in 0..worker_count {
-        let rx = rx.clone();
-
-        tokio::spawn(async move {
-            let _ = worker::worker(rx).await;
-        });
-
-        tokio::spawn(async move {
-            let _ = fault_tolerance::recover_stuck_jobs().await;
-        });
-    }
-    info!("Workers Spawned");
-    info!("Fault tolerance online");
-
-    let app = axum::Router::new()
-        .route("/createjob", post(jobs::create_job))
-        .route("/getjob/{id}", get(jobs::get_job))
-        .route("/metrics", get(metrics_handler))
-        .with_state(state.clone());
-
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8000")
-        .await
-        .expect("Failed to Start Server!");
-
-    info!("Listening on localhost:8000");
-    axum::serve(listener, app).await.unwrap()
 }

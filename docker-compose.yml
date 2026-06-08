@@ -18,18 +18,38 @@ services:
     ports:
       - "5432:5432"
   
-  saturn:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  saturn-api:
+    build: .
+    command: ["api"]
     ports:
-      - "8000:8000"
+      - "8000"
     environment:
       - POSTGRES_CONNECTION_URL=postgres://admin:password@postgresql:5432/Saturn
       - REDIS_CONNECTION_URL=redis://redis:6379
-      - SCHEDULER_COUNT=1
-      - WORKER_COUNT=0
-      - FAULT_TOLERANCE_COUNT=0
+    depends_on:
+      - redis
+      - postgresql
+
+  saturn-scheduler:
+    build: .
+    command: ["scheduler"]
+    expose:
+      - "8000"
+    environment:
+      - POSTGRES_CONNECTION_URL=postgres://admin:password@postgresql:5432/Saturn
+      - REDIS_CONNECTION_URL=redis://redis:6379
+    depends_on:
+      - redis
+      - postgresql
+
+  saturn-worker:
+    build: .
+    command: ["worker"]
+    expose:
+      - "8000"
+    environment:
+      - POSTGRES_CONNECTION_URL=postgres://admin:password@postgresql:5432/Saturn
+      - REDIS_CONNECTION_URL=redis://redis:6379
     depends_on:
       - redis
       - postgresql
@@ -42,7 +62,9 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     depends_on:
-      - saturn
+      - saturn-api
+      - saturn-scheduler
+      - saturn-worker
 
   grafana:
     image: grafana/grafana

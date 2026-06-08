@@ -4,6 +4,9 @@ CREATE TABLE IF NOT EXISTS pendingjobs (
     scheduled_for TIMESTAMPTZ DEFAULT NOW(),
     job_data JSONB,
     status TEXT,
+    claimed_by TEXT DEFAULT NULL,
+    attempt_id TEXT DEFAULT NULL,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    lease_expires_at TIMESTAMPTZ DEFAULT NOW() + 30
 );
