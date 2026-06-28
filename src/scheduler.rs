@@ -1,4 +1,4 @@
-use super::app_state::STATE;
+use super::app_state::init_state;
 use crate::node::{heartbeat, register_node};
 use chrono::Utc;
 use redis::{self, AsyncCommands, Script};
@@ -6,18 +6,21 @@ use sqlx;
 use tracing::{error, info};
 
 pub async fn run_scheduler() {
-    tokio::spawn(async move {
-        let state = STATE.get().unwrap();
-        let node_id = register_node(&state, "scheduler".to_string())
-            .await
-            .unwrap();
-        heartbeat(&node_id).await;
-        let _ = poll(&node_id).await;
+    let state = init_state().await;
+    let node_id = register_node(state, "scheduler".to_string()).await.unwrap();
+
+    tokio::spawn({
+        let node_id = node_id.clone();
+        async move {
+            heartbeat(&node_id).await;
+        }
     });
+
+    poll().await;
 }
 
-pub async fn poll(node_id: &str) {
-    let state = STATE.get().unwrap().clone();
+pub async fn poll() {
+    let state = init_state().await.clone();
 
     let mut redis_conn = state.redis.clone();
 
@@ -83,5 +86,7 @@ pub async fn poll(node_id: &str) {
                 let _: () = redis_conn.lpush("ready_jobs", job_id).await.unwrap();
             }
         }
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 }

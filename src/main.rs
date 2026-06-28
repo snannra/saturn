@@ -8,6 +8,7 @@ mod config;
 mod fault_tolerance;
 mod jobs;
 mod metrics;
+mod migrations;
 mod node;
 mod scheduler;
 mod users;
@@ -24,6 +25,8 @@ enum Command {
     Api,
     Scheduler,
     Worker,
+    Migration,
+    FaultTolerance,
 }
 
 #[tokio::main]
@@ -35,5 +38,7 @@ async fn main() {
         Command::Api => api::run_api().await,
         Command::Scheduler => scheduler::run_scheduler().await,
         Command::Worker => worker::run_worker().await,
+        Command::Migration => migrations::run_migrations().await,
+        Command::FaultTolerance => fault_tolerance::run_fault_tolerance().await,
     }
 }

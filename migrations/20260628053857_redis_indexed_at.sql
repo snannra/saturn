@@ -1,0 +1,2 @@
+ALTER TABLE pendingjobs
+ADD COLUMN redis_indexed_at TIMESTAMPTZ DEFAULT NULL;

@@ -16,6 +16,12 @@ pub struct JobToExecute {
     pub job_data: serde_json::Value,
 }
 
+#[derive(Debug, sqlx::FromRow)]
+pub struct ForgottenJob {
+    pub id: i32,
+    pub scheduled_for: DateTime<Utc>,
+}
+
 #[derive(Deserialize)]
 pub struct JobRequest {
     user: User,
@@ -113,13 +119,38 @@ pub async fn create_job(
         "Job Created"
     );
 
-    Ok((
-        StatusCode::OK,
-        Json(JobCreateResponse {
-            job_id,
-            message: "Job Created Successfully".to_string(),
-        }),
-    ))
+    match sqlx::query(
+        r#"
+        UPDATE pendingjobs
+        SET redis_indexed_at = NOW()
+        WHERE id = $1;
+        "#,
+    )
+    .bind(job_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(_) => {
+            info!("Inserted into redis sorted set");
+            Ok((
+                StatusCode::OK,
+                Json(JobCreateResponse {
+                    job_id,
+                    message: "Job Created Successfully".to_string(),
+                }),
+            ))
+        }
+        Err(e) => {
+            error!("Write to redis failed");
+            Ok((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(JobCreateResponse {
+                    job_id,
+                    message: "Failed to write to redis sorted set".to_string(),
+                }),
+            ))
+        }
+    }
 }
 
 pub async fn get_job(

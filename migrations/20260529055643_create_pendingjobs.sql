@@ -8,5 +8,5 @@ CREATE TABLE IF NOT EXISTS pendingjobs (
     attempt_id TEXT DEFAULT NULL,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    lease_expires_at TIMESTAMPTZ DEFAULT NOW() + 30
+    lease_expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '30 seconds'
 );

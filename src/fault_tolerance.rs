@@ -3,17 +3,20 @@ use redis::AsyncCommands;
 use sqlx;
 use tracing::{debug, error, info, warn};
 
-use crate::app_state::STATE;
+use crate::app_state::{AppState, init_state};
+use crate::jobs::ForgottenJob;
 
 pub async fn run_fault_tolerance() {
-    tokio::spawn(async move {
-        let _ = recover_stuck_jobs().await;
-    });
+    let state = init_state().await;
+
+    tokio::spawn(recover_jobs_redis_write_fail(state));
+    tokio::spawn(recover_stuck_jobs(state));
+    tokio::spawn(check_node_heartbeat(state));
+
+    std::future::pending::<()>().await;
 }
 
-pub async fn check_node_heartbeat() {
-    let state = STATE.get().unwrap();
-
+pub async fn check_node_heartbeat(state: &AppState) {
     loop {
         let now = Utc::now();
 
@@ -21,9 +24,9 @@ pub async fn check_node_heartbeat() {
 
         let down_nodes: Vec<String> = match sqlx::query_scalar::<_, String>(
             r#"
-            UPDATE saturn_nodes
+            SELECT node_id
+            FROM saturn_nodes
             WHERE last_heartbeat_at <= $1
-            RETURNING node_id
             "#,
         )
         .bind(expired_heartbeat)
@@ -40,12 +43,12 @@ pub async fn check_node_heartbeat() {
         if !down_nodes.is_empty() {
             warn!("Marked nodes as dead: {:?}", down_nodes);
         }
+
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
 }
 
-pub async fn recover_stuck_jobs() {
-    let state = STATE.get().unwrap();
-
+pub async fn recover_stuck_jobs(state: &AppState) {
     loop {
         let now: DateTime<Utc> = Utc::now();
 
@@ -93,6 +96,61 @@ pub async fn recover_stuck_jobs() {
                     .unwrap();
             }
             info!("Finished replacing failed jobs");
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+}
+
+pub async fn recover_jobs_redis_write_fail(state: &AppState) {
+    loop {
+        let forgotten_jobs = match sqlx::query_as::<_, ForgottenJob>(
+            r#"
+            SELECT id, scheduled_for
+            FROM pendingjobs
+            WHERE status = 'pending' AND redis_indexed_at IS NULL
+            LIMIT 100;
+            "#,
+        )
+        .fetch_all(&state.db)
+        .await
+        {
+            Ok(jobs) => jobs,
+            Err(e) => {
+                error!("Unable to get forgotten jobs: {:?}", e);
+                vec![]
+            }
+        };
+
+        if !forgotten_jobs.is_empty() {
+            let mut redis = state.redis.clone();
+
+            for job in forgotten_jobs {
+                let score = job.scheduled_for.timestamp();
+
+                match redis
+                    .zadd::<_, _, _, ()>("pending_jobs", job.id, score)
+                    .await
+                {
+                    Ok(_) => {
+                        sqlx::query(
+                            r#"
+                            UPDATE pendingjobs
+                            SET redis_indexed_at = NOW()
+                            WHERE id = $1
+                            "#,
+                        )
+                        .bind(job.id)
+                        .execute(&state.db)
+                        .await
+                        .unwrap();
+                    }
+
+                    Err(e) => {
+                        error!("Failed to index job {}: {}", job.id, e);
+                    }
+                }
+            }
         }
 
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;

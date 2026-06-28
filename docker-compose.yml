@@ -20,8 +20,8 @@ services:
   
   saturn-api:
     build: .
-    command: ["api"]
-    ports:
+    command: ["./saturn", "api"]
+    expose:
       - "8000"
     environment:
       - POSTGRES_CONNECTION_URL=postgres://admin:password@postgresql:5432/Saturn
@@ -29,10 +29,11 @@ services:
     depends_on:
       - redis
       - postgresql
+      - saturn-migrations
 
   saturn-scheduler:
     build: .
-    command: ["scheduler"]
+    command: ["./saturn", "scheduler"]
     expose:
       - "8000"
     environment:
@@ -41,10 +42,11 @@ services:
     depends_on:
       - redis
       - postgresql
+      - saturn-migrations
 
   saturn-worker:
     build: .
-    command: ["worker"]
+    command: ["./saturn", "worker"]
     expose:
       - "8000"
     environment:
@@ -53,7 +55,28 @@ services:
     depends_on:
       - redis
       - postgresql
-  
+      - saturn-migrations
+
+  saturn-migrations:
+    build: .
+    command: ["./saturn", "migration"]
+    depends_on:
+      - postgresql
+    restart: "no"
+    environment:
+      - POSTGRES_CONNECTION_URL=postgres://admin:password@postgresql:5432/Saturn
+      - REDIS_CONNECTION_URL=redis://redis:6379
+
+  saturn-fault-tolerance:
+    build: .
+    command: ["./saturn", "fault-tolerance"]
+    depends_on: 
+      - postgresql
+      - redis
+    environment:
+      - POSTGRES_CONNECTION_URL=postgres://admin:password@postgresql:5432/Saturn
+      - REDIS_CONNECTION_URL=redis://redis:6379
+
   prometheus:
     image: prom/prometheus
     ports:
@@ -74,6 +97,15 @@ services:
       - prometheus
     volumes:
       - grafana_data:/var/lib/grafana
+
+  nginx:
+    image: nginx:latest
+    ports: 
+      - "8000:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - saturn-api
 
 volumes:
   postgres_data:

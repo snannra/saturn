@@ -1,4 +1,4 @@
-use crate::{AppState, app_state::STATE};
+use crate::{AppState, app_state::init_state};
 use sqlx;
 use tracing::error;
 use uuid::Uuid;
@@ -24,7 +24,7 @@ pub async fn register_node(state: &AppState, role: String) -> Result<String, sql
             DO UPDATE SET
                 role = EXCLUDED.role,
                 last_heartbeat_at = now(),
-                deleted_at = NULL;
+                deleted_at = NULL
             RETURNING node_id
             "#,
     )
@@ -37,7 +37,7 @@ pub async fn register_node(state: &AppState, role: String) -> Result<String, sql
 }
 
 pub async fn heartbeat(node_id: &str) -> Result<String, sqlx::Error> {
-    let state = STATE.get().unwrap();
+    let state = init_state().await;
 
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
 
