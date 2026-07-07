@@ -3,8 +3,8 @@ use redis::AsyncCommands;
 use sqlx;
 use tracing::{debug, error, info, warn};
 
-use crate::app_state::{AppState, init_state};
-use crate::jobs::ForgottenJob;
+use crate::app::jobs::ForgottenJob;
+use crate::state::app_state::{AppState, init_state};
 
 pub async fn run_fault_tolerance() {
     let state = init_state().await;

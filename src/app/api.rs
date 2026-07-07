@@ -1,7 +1,7 @@
 use axum::routing::{get, post};
 use tracing::info;
 
-use crate::{app_state::init_state, jobs, metrics::metrics_handler};
+use crate::{app::jobs, metrics::registry::metrics_handler, state::app_state::init_state};
 
 pub async fn run_api() {
     let state = init_state().await.clone();

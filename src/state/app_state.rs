@@ -1,10 +1,10 @@
+use crate::db::{postgres::create_pg_pool, redis::create_redis_conn};
 use dotenvy::dotenv;
 use metrics_exporter_prometheus::PrometheusHandle;
-use redis::{self, aio::MultiplexedConnection};
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::PgPool;
 use tokio::sync::OnceCell;
 
-use crate::{config::Config, metrics::setup_metrics};
+use crate::{metrics::registry::setup_metrics, state::config::Config};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -37,22 +37,4 @@ pub async fn init_state() -> &'static AppState {
             }
         })
         .await
-}
-
-pub async fn create_pg_pool(config: &Config) -> PgPool {
-    PgPoolOptions::new()
-        .max_connections(50)
-        .connect(&config.postgres_url)
-        .await
-        .expect("failed to connect to postgres")
-}
-
-pub async fn create_redis_conn(config: &Config) -> MultiplexedConnection {
-    let redis_client =
-        redis::Client::open(&*config.redis_url).expect("failed to create redis client");
-
-    redis_client
-        .get_multiplexed_async_connection()
-        .await
-        .unwrap()
 }

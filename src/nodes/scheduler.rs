@@ -1,9 +1,9 @@
-use super::app_state::init_state;
-use crate::node::{heartbeat, register_node};
+use crate::nodes::node::{heartbeat, register_node};
+use crate::state::app_state::init_state;
 use chrono::Utc;
 use redis::{self, AsyncCommands, Script};
 use sqlx;
-use tracing::{error, info};
+use tracing::error;
 
 pub async fn run_scheduler() {
     let state = init_state().await;
@@ -12,7 +12,7 @@ pub async fn run_scheduler() {
     tokio::spawn({
         let node_id = node_id.clone();
         async move {
-            heartbeat(&node_id).await;
+            let _ = heartbeat(&node_id).await;
         }
     });
 

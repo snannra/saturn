@@ -1,4 +1,4 @@
-use crate::{AppState, app_state::init_state};
+use crate::state::app_state::{AppState, init_state};
 use sqlx;
 use tracing::error;
 use uuid::Uuid;

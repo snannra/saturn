@@ -1,7 +1,7 @@
 use crate::{
-    app_state::{AppState, init_state},
-    jobs::JobToExecute,
-    node::{heartbeat, register_node},
+    app::jobs::JobToExecute,
+    nodes::node::{heartbeat, register_node},
+    state::app_state::{AppState, init_state},
 };
 use chrono::{Duration, Utc};
 use redis::AsyncCommands;
@@ -16,7 +16,7 @@ pub async fn run_worker() {
     tokio::spawn({
         let node_id = node_id.clone();
         async move {
-            heartbeat(&node_id).await;
+            let _ = heartbeat(&node_id).await;
         }
     });
 

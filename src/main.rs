@@ -1,18 +1,7 @@
 use clap::{Parser, Subcommand};
-
-use crate::app_state::AppState;
-
-mod api;
-mod app_state;
-mod config;
-mod fault_tolerance;
-mod jobs;
-mod metrics;
-mod migrations;
-mod node;
-mod scheduler;
-mod users;
-mod worker;
+use saturn::{
+    app::api, db::migrations, nodes::scheduler, nodes::worker, tolerance::fault_tolerance,
+};
 
 #[derive(Parser)]
 struct Cli {

@@ -1,4 +1,4 @@
-use crate::AppState;
+use crate::state::app_state::AppState;
 use axum::extract::State;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 

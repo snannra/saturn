@@ -1,5 +1,5 @@
-use crate::app_state::create_pg_pool;
-use crate::config::Config;
+use crate::db::postgres::create_pg_pool;
+use crate::state::config::Config;
 use sqlx;
 
 pub async fn run_migrations() {

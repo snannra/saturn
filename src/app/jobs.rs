@@ -1,4 +1,4 @@
-use crate::{AppState, users::User};
+use crate::{app::users::User, state::app_state::AppState};
 use axum::{
     extract::{Json, Path, State},
     http::StatusCode,
@@ -146,7 +146,7 @@ pub async fn create_job(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(JobCreateResponse {
                     job_id,
-                    message: "Failed to write to redis sorted set".to_string(),
+                    message: format!("Failed to write to redis sorted set: {e}"),
                 }),
             ))
         }
