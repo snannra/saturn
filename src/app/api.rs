@@ -1,11 +1,16 @@
 use axum::routing::{get, post};
 use tracing::info;
 
-use crate::{app::jobs, metrics::registry::metrics_handler, state::app_state::init_state};
+use crate::{
+    app::jobs, db::redis::init_stream_group, metrics::registry::metrics_handler,
+    state::app_state::init_state,
+};
 
 pub async fn run_api() {
-    let state = init_state().await.clone();
+    let mut state = init_state().await.clone();
     info!("API AppState Initialized");
+
+    let _ = init_stream_group(&mut state.redis).await;
 
     let app = axum::Router::new()
         .route("/createjob", post(jobs::create_job))
