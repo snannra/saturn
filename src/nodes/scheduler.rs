@@ -1,3 +1,4 @@
+use crate::db::redis::redis_stream_enqueue;
 use crate::nodes::node::{heartbeat, register_node};
 use crate::state::app_state::init_state;
 use chrono::Utc;
@@ -83,7 +84,9 @@ pub async fn poll() {
             };
 
             for job_id in jobs {
-                let _: () = redis_conn.lpush("ready_jobs", job_id).await.unwrap();
+                if let Err(e) = redis_stream_enqueue(&mut redis_conn, job_id).await {
+                    tracing::error!("Failde to enqueue job {job_id}: {e}");
+                }
             }
         }
 

@@ -1,9 +1,11 @@
 use chrono::{DateTime, Duration, Utc};
 use redis::AsyncCommands;
+use redis::{RedisResult, aio::MultiplexedConnection};
 use sqlx;
 use tracing::{debug, error, info, warn};
 
 use crate::app::jobs::ForgottenJob;
+use crate::db::redis::redis_stream_enqueue;
 use crate::state::app_state::{AppState, init_state};
 
 pub async fn run_fault_tolerance() {
@@ -87,13 +89,9 @@ pub async fn recover_stuck_jobs(state: &AppState) {
             let mut redis_conn = state.redis.clone();
 
             for id in expired_ids {
-                let _: () = redis_conn
-                    .lpush("ready_jobs", id)
-                    .await
-                    .map_err(|e| {
-                        error!("Redis insert into redis queue failed: {e}");
-                    })
-                    .unwrap();
+                if let Err(e) = redis_stream_enqueue(&mut redis_conn, id).await {
+                    tracing::error!("Failde to enqueue job {id}: {e}");
+                }
             }
             info!("Finished replacing failed jobs");
         }
@@ -155,4 +153,37 @@ pub async fn recover_jobs_redis_write_fail(state: &AppState) {
 
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
+}
+
+pub async fn recover_pending_stream_jobs(
+    state: AppState,
+    worker_id: &str,
+) -> RedisResult<Vec<(String, i32)>> {
+    let mut redis = state.redis;
+    let reply: redis::streams::StreamAutoClaimReply = redis
+        .xautoclaim_options(
+            "ready_jobs",
+            "workers",
+            worker_id,
+            30_000,
+            0 - 0,
+            redis::streams::StreamAutoClaimOptions::default().count(10),
+        )
+        .await?;
+
+    let mut jobs = Vec::new();
+
+    for message in reply.claimed {
+        let stream_id = message.id;
+
+        let Some(job_id_value) = message.map.get("job_id") else {
+            continue;
+        };
+
+        let job_id: i32 = redis::from_redis_value(job_id_value.clone())?;
+
+        jobs.push((stream_id, job_id))
+    }
+
+    Ok(jobs)
 }

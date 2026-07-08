@@ -1,10 +1,11 @@
 use crate::{
     app::jobs::JobToExecute,
+    db::redis::{read_next_job, redis_ack},
     nodes::node::{heartbeat, register_node},
     state::app_state::{AppState, init_state},
+    tolerance::fault_tolerance::recover_pending_stream_jobs,
 };
 use chrono::{Duration, Utc};
-use redis::AsyncCommands;
 use sqlx;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -20,20 +21,30 @@ pub async fn run_worker() {
         }
     });
 
-    worker(&node_id).await;
+    tokio::spawn({
+        let node_id = node_id.clone();
+        let mut state = state.clone();
+        async move {
+            recover_pending_stream_jobs(state, &node_id).await;
+        }
+    });
+
+    worker(&node_id, state).await;
 }
 
-pub async fn worker(node_id: &str) {
-    let state = init_state().await;
-
+pub async fn worker(node_id: &str, state: &AppState) {
     let mut redis_conn = state.redis.clone();
 
     loop {
-        match redis_conn.brpop("ready_jobs", 5.0).await {
-            Ok(Some((_queue, job_id))) => handle_worker(_queue, job_id, node_id, state).await,
-            Ok(None) => continue,
+        match read_next_job(&mut redis_conn, node_id).await {
+            Ok(Some((stream_id, job_id))) => {
+                handle_worker(stream_id, job_id, node_id, state).await;
+            }
+            Ok(None) => {
+                continue;
+            }
             Err(err) => {
-                tracing::warn!("redis brpop error: {:?}", err);
+                tracing::warn!("redis xreadgroup error: {:?}", err);
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 continue;
             }
@@ -41,7 +52,8 @@ pub async fn worker(node_id: &str) {
     }
 }
 
-pub async fn handle_worker(_queue: String, job_id: i32, node_id: &str, state: &AppState) {
+pub async fn handle_worker(stream_id: String, job_id: i32, node_id: &str, state: &AppState) {
+    let mut redis_conn = state.redis.clone();
     let mut now = Utc::now();
     let attempt_lease = now + Duration::seconds(10);
 
@@ -124,6 +136,11 @@ pub async fn handle_worker(_queue: String, job_id: i32, node_id: &str, state: &A
     // Job Completed
     let _ = stop_tx.send(());
     let _ = renew_handle.await;
+    let acked = redis_ack(&mut redis_conn, &stream_id).await.unwrap();
+
+    if acked != 1 {
+        tracing::warn!("Expected to ack 1 message, acked {acked}");
+    }
 
     now = Utc::now();
 
