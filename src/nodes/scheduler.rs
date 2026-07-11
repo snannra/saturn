@@ -2,7 +2,7 @@ use crate::db::redis::redis_stream_enqueue;
 use crate::nodes::node::{heartbeat, register_node};
 use crate::state::app_state::init_state;
 use chrono::Utc;
-use redis::{self, AsyncCommands, Script};
+use redis::{self, Script};
 use sqlx;
 use tracing::error;
 

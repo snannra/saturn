@@ -23,9 +23,9 @@ pub async fn run_worker() {
 
     tokio::spawn({
         let node_id = node_id.clone();
-        let mut state = state.clone();
+        let state = state.clone();
         async move {
-            recover_pending_stream_jobs(state, &node_id).await;
+            let _ = recover_pending_stream_jobs(state, &node_id).await;
         }
     });
 

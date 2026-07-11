@@ -1,8 +1,9 @@
+use crate::app::jobs::{JobBatchItem, batch_flusher, marker_flusher};
 use crate::db::{postgres::create_pg_pool, redis::create_redis_conn};
 use dotenvy::dotenv;
 use metrics_exporter_prometheus::PrometheusHandle;
 use sqlx::PgPool;
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, mpsc};
 
 use crate::{metrics::registry::setup_metrics, state::config::Config};
 
@@ -12,6 +13,8 @@ pub struct AppState {
     pub redis: redis::aio::MultiplexedConnection,
     pub config: Config,
     pub prom_handle: PrometheusHandle,
+    pub job_tx: tokio::sync::mpsc::Sender<JobBatchItem>,
+    pub marker_tx: tokio::sync::mpsc::Sender<i32>,
 }
 
 pub static STATE: OnceCell<AppState> = OnceCell::const_new();
@@ -29,11 +32,19 @@ pub async fn init_state() -> &'static AppState {
 
             let prom_handle = setup_metrics();
 
+            let (job_tx, job_rx) = mpsc::channel::<JobBatchItem>(10000);
+            let (marker_tx, marker_rx) = mpsc::channel::<i32>(10000);
+
+            tokio::spawn(batch_flusher(job_rx, db.clone()));
+            tokio::spawn(marker_flusher(marker_rx, db.clone()));
+
             AppState {
                 db,
                 redis: redis_conn,
                 config,
                 prom_handle,
+                job_tx,
+                marker_tx,
             }
         })
         .await

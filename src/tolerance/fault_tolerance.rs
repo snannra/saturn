@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use redis::AsyncCommands;
-use redis::{RedisResult, aio::MultiplexedConnection};
+use redis::RedisResult;
 use sqlx;
 use tracing::{debug, error, info, warn};
 

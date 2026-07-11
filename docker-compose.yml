@@ -23,6 +23,7 @@ services:
     command: ["./saturn", "api"]
     expose:
       - "8000"
+    ports: ["8001:8000"]
     environment:
       - POSTGRES_CONNECTION_URL=postgres://admin:password@postgresql:5432/Saturn
       - REDIS_CONNECTION_URL=redis://redis:6379
