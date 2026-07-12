@@ -36,9 +36,7 @@ pub async fn register_node(state: &AppState, role: String) -> Result<String, sql
     Ok(node_id)
 }
 
-pub async fn heartbeat(node_id: &str) -> Result<String, sqlx::Error> {
-    let state = init_state().await;
-
+pub async fn heartbeat(node_id: &str, state: &AppState) -> Result<String, sqlx::Error> {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
 
     loop {

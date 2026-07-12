@@ -9,4 +9,4 @@ CREATE TABLE IF NOT EXISTS pendingjobs (
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     lease_expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '30 seconds'
-);
+);o

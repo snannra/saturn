@@ -17,6 +17,8 @@ use tracing::error;
 pub struct JobToExecute {
     pub id: i32,
     pub job_data: serde_json::Value,
+    pub attempts: i32,
+    pub max_attempts: i32,
 }
 
 #[derive(Debug, sqlx::FromRow)]

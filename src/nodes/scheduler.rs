@@ -13,7 +13,7 @@ pub async fn run_scheduler() {
     tokio::spawn({
         let node_id = node_id.clone();
         async move {
-            let _ = heartbeat(&node_id).await;
+            let _ = heartbeat(&node_id, &state).await;
         }
     });
 

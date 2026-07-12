@@ -20,6 +20,7 @@ pub async fn run_fault_tolerance() {
 
 pub async fn check_node_heartbeat(state: &AppState) {
     loop {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         let now = Utc::now();
 
         let expired_heartbeat = now - Duration::seconds(15);
@@ -45,13 +46,12 @@ pub async fn check_node_heartbeat(state: &AppState) {
         if !down_nodes.is_empty() {
             warn!("Marked nodes as dead: {:?}", down_nodes);
         }
-
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
 }
 
 pub async fn recover_stuck_jobs(state: &AppState) {
     loop {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         let now: DateTime<Utc> = Utc::now();
 
         let expired_ids: Vec<i32> = match sqlx::query_scalar(
@@ -63,7 +63,7 @@ pub async fn recover_stuck_jobs(state: &AppState) {
                 attempt_id = NULL,
                 lease_expires_at = NULL
             WHERE status = 'executing' 
-              AND updated_at < now()
+              AND lease_expires_at < now()
             RETURNING id
         "#,
         )
@@ -95,8 +95,6 @@ pub async fn recover_stuck_jobs(state: &AppState) {
             }
             info!("Finished replacing failed jobs");
         }
-
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
 }
 
@@ -106,7 +104,7 @@ pub async fn recover_jobs_redis_write_fail(state: &AppState) {
             r#"
             SELECT id, scheduled_for
             FROM pendingjobs
-            WHERE status = 'pending' AND redis_indexed_at IS NULL
+            WHERE status = 'pending' AND redis_indexed_at IS NULL AND created_at < NOW() - interval '5 seconds'
             LIMIT 100;
             "#,
         )
@@ -131,7 +129,7 @@ pub async fn recover_jobs_redis_write_fail(state: &AppState) {
                     .await
                 {
                     Ok(_) => {
-                        sqlx::query(
+                        if let Err(e) = sqlx::query(
                             r#"
                             UPDATE pendingjobs
                             SET redis_indexed_at = NOW()
@@ -141,7 +139,9 @@ pub async fn recover_jobs_redis_write_fail(state: &AppState) {
                         .bind(job.id)
                         .execute(&state.db)
                         .await
-                        .unwrap();
+                        {
+                            error!("failed to makr job {} as indexed: {e}", job.id);
+                        }
                     }
 
                     Err(e) => {
@@ -166,7 +166,7 @@ pub async fn recover_pending_stream_jobs(
             "workers",
             worker_id,
             30_000,
-            0 - 0,
+            "0-0",
             redis::streams::StreamAutoClaimOptions::default().count(10),
         )
         .await?;
