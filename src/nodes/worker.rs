@@ -1,10 +1,10 @@
 use crate::{
     app::{
+        api::shutdown_signal,
         error::{JobError, JobOutcome},
         jobs::JobToExecute,
     },
     db::redis::{read_next_job, redis_ack},
-    nodes::node::{heartbeat, register_node},
     state::app_state::{AppState, init_state},
     tolerance::fault_tolerance::recover_pending_stream_jobs,
 };
@@ -17,41 +17,61 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 pub async fn run_worker() {
-    let state = init_state().await;
-    let node_id = register_node(state, "worker".to_string()).await.unwrap();
+    let (state, _job_rx, _marker_rx) = init_state().await;
+
+    let shutdown = CancellationToken::new();
+    let node_id = Uuid::new_v4().to_string();
 
     tokio::spawn({
-        let node_id = node_id.clone();
+        let shutdown = shutdown.clone();
         async move {
-            let _ = heartbeat(&node_id, &state).await;
+            shutdown_signal().await;
+            info!("shutdown signal received");
+            shutdown.cancel();
         }
     });
 
-    tokio::spawn({
+    let recovery_handle = tokio::spawn({
+        let mut state = state.clone();
         let node_id = node_id.clone();
+        let shutdown = shutdown.clone();
         async move {
             loop {
-                match recover_pending_stream_jobs(state.clone(), &node_id).await {
+                tokio::select! {
+                    _ = shutdown.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {}
+                }
+                match recover_pending_stream_jobs(&mut state, &node_id).await {
                     Ok(jobs) => {
-                        for (stream_id, job_id) in jobs {
-                            handle_worker(stream_id, job_id, &node_id, &state).await;
+                        for (sid, jid) in jobs {
+                            if shutdown.is_cancelled() {
+                                break;
+                            }
+                            handle_worker(sid, jid, &node_id, &state).await;
                         }
                     }
                     Err(e) => error!("stream recovery failed: {e}"),
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
             }
         }
     });
 
-    worker(&node_id, state).await;
+    worker(&node_id, &state, shutdown).await;
+
+    let _ = recovery_handle.await;
+    info!("worker shutdown complete");
 }
 
-pub async fn worker(node_id: &str, state: &AppState) {
+pub async fn worker(node_id: &str, state: &AppState, shutdown: CancellationToken) {
     let mut redis_conn = state.redis.clone();
 
     loop {
-        match read_next_job(&mut redis_conn, node_id).await {
+        let next = tokio::select! {
+            _ = shutdown.cancelled() => break,
+            r = read_next_job(&mut redis_conn, node_id) => r,
+        };
+
+        match next {
             Ok(Some((stream_id, job_id))) => {
                 handle_worker(stream_id, job_id, node_id, state).await;
             }
@@ -61,7 +81,6 @@ pub async fn worker(node_id: &str, state: &AppState) {
             Err(err) => {
                 tracing::warn!("redis xreadgroup error: {:?}", err);
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                continue;
             }
         }
     }

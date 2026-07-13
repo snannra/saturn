@@ -1,57 +1,55 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
+use metrics::counter;
 use redis::AsyncCommands;
 use redis::RedisResult;
 use sqlx;
-use tracing::{debug, error, info, warn};
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info};
 
+use crate::app::api::shutdown_signal;
 use crate::app::jobs::ForgottenJob;
 use crate::db::redis::redis_stream_enqueue;
 use crate::state::app_state::{AppState, init_state};
 
 pub async fn run_fault_tolerance() {
-    let state = init_state().await;
+    let (state, _job_rx, _marker_rx) = init_state().await;
+    info!("fault-tolerance service starting");
 
-    tokio::spawn(recover_jobs_redis_write_fail(state));
-    tokio::spawn(recover_stuck_jobs(state));
-    tokio::spawn(check_node_heartbeat(state));
-
-    std::future::pending::<()>().await;
-}
-
-pub async fn check_node_heartbeat(state: &AppState) {
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        let now = Utc::now();
-
-        let expired_heartbeat = now - Duration::seconds(15);
-
-        let down_nodes: Vec<String> = match sqlx::query_scalar::<_, String>(
-            r#"
-            SELECT node_id
-            FROM saturn_nodes
-            WHERE last_heartbeat_at <= $1
-            "#,
-        )
-        .bind(expired_heartbeat)
-        .fetch_all(&state.db)
-        .await
-        {
-            Ok(nodes) => nodes,
-            Err(e) => {
-                error!("Failed to check node heartbeats: {}", e);
-                continue;
-            }
-        };
-
-        if !down_nodes.is_empty() {
-            warn!("Marked nodes as dead: {:?}", down_nodes);
+    let shutdown = CancellationToken::new();
+    tokio::spawn({
+        let shutdown = shutdown.clone();
+        async move {
+            shutdown_signal().await;
+            shutdown.cancel();
         }
-    }
+    });
+
+    let h1 = tokio::spawn({
+        let state = state.clone();
+        let shutdown = shutdown.clone();
+        async move { recover_jobs_redis_write_fail(&state, shutdown).await }
+    });
+    let h2 = tokio::spawn({
+        let state = state.clone();
+        let shutdown = shutdown.clone();
+        async move { recover_stuck_jobs(&state, shutdown).await }
+    });
+    let h3 = tokio::spawn({
+        let state = state.clone();
+        let shutdown = shutdown.clone();
+        async move { recover_stale_queued_jobs(&state, shutdown).await }
+    });
+
+    let _ = tokio::join!(h1, h2, h3);
+    info!("fault-tolerance shutdown complete");
 }
 
-pub async fn recover_stuck_jobs(state: &AppState) {
+pub async fn recover_stuck_jobs(state: &AppState, shutdown: CancellationToken) {
     loop {
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        tokio::select! {
+            _ = shutdown.cancelled() => return,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+        }
         let now: DateTime<Utc> = Utc::now();
 
         let expired_ids: Vec<i32> = match sqlx::query_scalar(
@@ -98,8 +96,13 @@ pub async fn recover_stuck_jobs(state: &AppState) {
     }
 }
 
-pub async fn recover_jobs_redis_write_fail(state: &AppState) {
+pub async fn recover_jobs_redis_write_fail(state: &AppState, shutdown: CancellationToken) {
     loop {
+        tokio::select! {
+            _ = shutdown.cancelled() => return,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+        }
+
         let forgotten_jobs = match sqlx::query_as::<_, ForgottenJob>(
             r#"
             SELECT id, scheduled_for
@@ -150,16 +153,14 @@ pub async fn recover_jobs_redis_write_fail(state: &AppState) {
                 }
             }
         }
-
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
 }
 
 pub async fn recover_pending_stream_jobs(
-    state: AppState,
+    state: &mut AppState,
     worker_id: &str,
 ) -> RedisResult<Vec<(String, i32)>> {
-    let mut redis = state.redis;
+    let redis = &mut state.redis;
     let reply: redis::streams::StreamAutoClaimReply = redis
         .xautoclaim_options(
             "ready_jobs",
@@ -186,4 +187,41 @@ pub async fn recover_pending_stream_jobs(
     }
 
     Ok(jobs)
+}
+
+pub async fn recover_stale_queued_jobs(state: &AppState, shutdown: CancellationToken) {
+    let mut redis_conn = state.redis.clone();
+    loop {
+        tokio::select! {
+            _ = shutdown.cancelled() => return,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+        }
+
+        let stale: Vec<i32> = match sqlx::query_scalar(
+            r#"
+            SELECT id FROM pendingjobs
+            WHERE status = 'queued'
+              AND updated_at < now() - interval '1 minute'
+            LIMIT 100
+            "#,
+        )
+        .fetch_all(&state.db)
+        .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                error!("stale-queued scan failed: {e}");
+                continue;
+            }
+        };
+
+        for job_id in stale {
+            if let Err(e) = redis_stream_enqueue(&mut redis_conn, job_id).await {
+                error!("failed to re-enqueue stale queued job {job_id}: {e}");
+            } else {
+                counter!("saturn_stale_queued_recovered_total").increment(1);
+                info!("re-enqueued stale queued job {job_id}");
+            }
+        }
+    }
 }
